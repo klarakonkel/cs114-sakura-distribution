@@ -41,7 +41,7 @@ year_col = [c for c in df.columns if str(c).isdigit()]
 # day of the year for each year (in each site)
 all_days = df[year_col].apply(lambda col: pd.to_datetime(col, errors="coerce").dt.dayofyear)
 all_days.index = df["Site Name"]
-print(all_days[all_days < 70].stack())
+#print(all_days[all_days < 70].stack())
 
 # mean of full bloom per year
 year_mean = all_days.mean(axis=0)
@@ -69,7 +69,7 @@ plt.show()
 
 #because I noticed that the southern part of Japan has very different blooming dates than the rest of Japan, I decided to clean the data further and exclude those data points to investigate the distribution for "mainland" Japan
 #to do that, I first printed all the locations: print(all_days.index.tolist()), then manually excluded Islands, by asking AI to classify which location is where on the map, link to conversation: https://claude.ai/share/b978ebe4-da5d-4a47-897d-e9af627c7481
-print(all_days.index.tolist())
+#print(all_days.index.tolist())
 excluded_locations = [
   "Wakkanai", "Rumoi", "Asahikawa", "Abashiri", "Sapporo", "Iwamizawa",
   "Obihiro", "Kushiro", "Nemuro", "Muroran", "Urakawa", "Esashi",
@@ -176,12 +176,13 @@ processed_datapoints = processed_datapoints[np.isfinite(processed_datapoints)]
 no_bins = int(max(processed_datapoints)) - int(min(processed_datapoints))
 counts, bins, _ = plt.hist(processed_datapoints, bins=no_bins, color=PETAL_L, edgecolor='white')
 # fit negative binomial
-mean = processed_datapoints.mean() - first_datapoint  # shift first
-var = processed_datapoints.var()
+shifted = processed_datapoints - first_datapoint  # shift first
+mean_shifted = shifted.mean()
+var_shifted = shifted.var()
 
 # method of moments estimates
-p_nb = mean / var
-n_nb = mean * p_nb / (1 - p_nb)
+p_nb = mean_shifted / var_shifted
+n_nb = mean_shifted * p_nb / (1 - p_nb)
 
 x_days = np.arange(int(processed_datapoints.min()), int(processed_datapoints.max()))
 bin_width = bins[1] - bins[0]
@@ -237,11 +238,7 @@ plt.legend()
 plt.show()
 
 
-print("log lik normal:", log_lik_normal)
-print("log lik nbinom:", log_lik_nbinom)
-print("difference:", log_lik_nbinom - log_lik_normal)
-print("mu_normal:", mu_normal)
-print("std_normal:", std_normal)
-print("n_nb:", n_nb)
-print("p_nb:", p_nb)
-print("loc:", loc)
+print("nbinom pmf at day 97:", nbinom_pmf(97, n_nb, p_nb, loc))
+print("normal pmf at day 97:", normal_pmf(97, mu_normal, std_normal))
+print("nbinom pmf at day 145:", nbinom_pmf(145, n_nb, p_nb, loc))
+print("normal pmf at day 145:", normal_pmf(145, mu_normal, std_normal))
