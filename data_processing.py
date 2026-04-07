@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from scipy.stats import geom
+from scipy.stats import geom, nbinom
 
 # color pallette for pretty data viz <3
 PETAL   = "#E8749A"   # deep sakura pink
@@ -231,17 +231,6 @@ it makes sense to be a negative binomial, even if our dataset gives us only the 
 being accumulated; they are still reflected in the pattern of the data.
 """
 
-
-#----PLOTTING THE HISTOGRAM 6: fitting negative binomial to individual datapoints across mainland locations)----
-from scipy.stats import nbinom
-plt.figure()
-plt.title("Japanese Cherry Blossom - Full Bloom Dates (Central Japan), NEGATIVE BINOM INDIVIDUAL DATAPOINTS", fontsize=14, fontfamily='serif')
-plt.xlabel('Day of the year', fontsize=12, fontfamily='serif')
-plt.ylabel('Count', fontsize=12, fontfamily='serif')
-processed_datapoints = all_days_mainland.to_numpy().ravel()
-processed_datapoints = processed_datapoints[np.isfinite(processed_datapoints)]
-no_bins = int(max(processed_datapoints)) - int(min(processed_datapoints))
-counts, bins, _ = plt.hist(processed_datapoints, bins=no_bins, color=PETAL_L, edgecolor='white')
 # fit negative binomial
 shifted = processed_datapoints - first_datapoint  # shift first
 mean_shifted = shifted.mean()
@@ -257,55 +246,52 @@ bin_width = bins[1] - bins[0]
 print(f"stdev: {processed_datapoints.std()}")
 print(f"median: {np.median(processed_datapoints)}")
 
+#----BAYESIAN MODEL SELECTION: geometric vs negative binomial----
 
-def normal_pmf(day, mu, std):
-    p = norm.cdf(day + 0.5, mu, std) - norm.cdf(day - 0.5, mu, std)
-    return max(p, 1e-300)  # never return exactly 0
+loc = first_datapoint
+# parameters already computed above: p, first_datapoint, n_nb, p_nb, loc
+
+def geom_pmf(day, p, loc):
+    prob = geom.pmf(day, p, loc=loc)
+    return max(prob, 1e-300)
 
 def nbinom_pmf(day, n, p, loc):
     prob = nbinom.pmf(day, n, p, loc=loc)
     return max(prob, 1e-300)
 
-loc = int(processed_datapoints.min()) - 1
-# normal parameters
-mu_normal = processed_datapoints.mean()
-std_normal = processed_datapoints.std()
-
-# nbinom parameters  
-shifted = processed_datapoints - first_datapoint
-p_nb = shifted.mean() / shifted.var()
-n_nb = shifted.mean() * p_nb / (1 - p_nb)
-
-# normal
-plt.plot(x_days, [normal_pmf(x, mu_normal, std_normal) * len(processed_datapoints) for x in x_days],
-         color=LEAF, lw=2, label='Discretized Normal fit')
-
-# nbinom
-plt.plot(x_days, [nbinom_pmf(x, n_nb, p_nb, loc) * len(processed_datapoints) for x in x_days],
-         color=ACCENT, lw=2, label='Negative Binomial fit')
-
-
-# then use correct variables in PMFs
-log_lik_normal = sum(np.log(normal_pmf(x, mu_normal, std_normal)) for x in processed_datapoints)
+# likelihood = product of PMF over all observations (sum in log space)
+log_lik_geom  = sum(np.log(geom_pmf(x, p, first_datapoint)) for x in processed_datapoints)
 log_lik_nbinom = sum(np.log(nbinom_pmf(x, n_nb, p_nb, loc)) for x in processed_datapoints)
 
-log_num_normal = log_lik_normal + np.log(0.5)
+# multiply by prior (0.5 each, since we have 2 and let's say they are equally likely since we don't know how to 
+# quantify otherwise), in log space this is + log(0.5)
+log_num_geom  = log_lik_geom  + np.log(0.5)
 log_num_nbinom = log_lik_nbinom + np.log(0.5)
 
-# log-sum-exp trick
-max_log = max(log_num_normal, log_num_nbinom)
-log_p_D = max_log + np.log(np.exp(log_num_normal - max_log) + np.exp(log_num_nbinom - max_log))
+# log-sum-exp trick to avoid underflow when computing p(D)
+max_log = max(log_num_geom, log_num_nbinom)
+log_p_D = max_log + np.log(np.exp(log_num_geom - max_log) + np.exp(log_num_nbinom - max_log))
 
-P_normal = np.exp(log_num_normal - log_p_D)
-P_nbinom  = np.exp(log_num_nbinom - log_p_D)
+P_geom  = np.exp(log_num_geom  - log_p_D)
+P_nbinom = np.exp(log_num_nbinom - log_p_D)
 
-print("P(normal | data):", P_normal)
-print("P(nbinom | data):", P_nbinom)
+print("P(geometric | data):", P_geom)
+print("P(nbinom | data):",    P_nbinom)
+print("log likelihood geometric:", log_lik_geom)
+print("log likelihood nbinom:",    log_lik_nbinom)
+print("difference:", log_lik_nbinom - log_lik_geom)
+
+# plotting both PMFs over histogram
+plt.figure()
+plt.title("Bayesian Model Selection: Geometric vs Negative Binomial", fontsize=14, fontfamily='serif')
+plt.xlabel('Day of the year', fontsize=12, fontfamily='serif')
+plt.ylabel('Count', fontsize=12, fontfamily='serif')
+counts, bins, _ = plt.hist(processed_datapoints, bins=no_bins, color=PETAL_L, edgecolor='white')
+
+x_days = np.arange(int(processed_datapoints.min()), int(processed_datapoints.max()))
+plt.plot(x_days, [geom_pmf(x, p, first_datapoint) * len(processed_datapoints) for x in x_days],
+         color=LEAF, lw=2, label=f'Geometric (p={p:.3f})')
+plt.plot(x_days, [nbinom_pmf(x, n_nb, p_nb, loc) * len(processed_datapoints) for x in x_days],
+         color=ACCENT, lw=2, label=f'Negative Binomial (n={n_nb:.1f}, p={p_nb:.3f})')
 plt.legend()
 plt.show()
-
-
-print("nbinom pmf at day 97:", nbinom_pmf(97, n_nb, p_nb, loc))
-print("normal pmf at day 97:", normal_pmf(97, mu_normal, std_normal))
-print("nbinom pmf at day 145:", nbinom_pmf(145, n_nb, p_nb, loc))
-print("normal pmf at day 145:", normal_pmf(145, mu_normal, std_normal))
